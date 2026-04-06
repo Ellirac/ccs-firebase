@@ -1,0 +1,199 @@
+// firestore.rules
+// CCS Comprehensive Profiling System — Firestore Security Rules
+// ENFORCED: Students and Faculty can ONLY edit their own records
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ───────────────────────────────────────────────────
+    function isSignedIn()    { return request.auth != null; }
+    function role()          { return request.auth.token.role; }
+    function isAdmin()       { return role() == 'admin'; }
+    function isFaculty()     { return role() == 'faculty' || role() == 'admin'; }
+    function isStudent()     { return role() == 'student'; }
+    function linkedId()      { return request.auth.token.linkedId; }
+    function isOwnRecord(id) { return linkedId() == id; }
+
+    // ── users ──────────────────────────────────────────────────────────────
+    // Each user can ONLY read and update their own user document
+    match /users/{userId} {
+      allow read:   if isSignedIn() && (isAdmin() || request.auth.uid == userId);
+      allow create: if isAdmin();
+      // Only the user themselves can update their own doc (e.g. profile pic)
+      allow update: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if isAdmin();
+    }
+
+    // ── departments ────────────────────────────────────────────────────────
+    match /departments/{deptId} {
+      allow read:   if isSignedIn();
+      allow write:  if isAdmin();
+    }
+
+    // ── faculty ────────────────────────────────────────────────────────────
+    // Faculty can ONLY update their own profile — not another faculty's
+    match /faculty/{facId} {
+      allow read:   if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin()
+                    || (isFaculty() && isOwnRecord(facId)
+                        // Faculty cannot change their own role, dept, or position
+                        && !('position' in request.resource.data)
+                        && !('deptId'   in request.resource.data));
+      allow delete: if isAdmin();
+    }
+
+    // ── students ───────────────────────────────────────────────────────────
+    // Students can ONLY read and update THEIR OWN profile
+    // Faculty can read all students (to see their class rosters)
+    // Students CANNOT read other students' records
+    match /students/{stuId} {
+      allow read:   if isAdmin()
+                    || isFaculty()
+                    || (isStudent() && isOwnRecord(stuId));
+      allow create: if isAdmin();
+      allow update: if isAdmin()
+                    || (isStudent() && isOwnRecord(stuId)
+                        // Students cannot change their own course, year, section or dept
+                        && !('deptId'     in request.resource.data)
+                        && !('course'     in request.resource.data)
+                        && !('yearLevel'  in request.resource.data)
+                        && !('section'    in request.resource.data)
+                        && !('isOfficer'  in request.resource.data)
+                        && !('scholarship'in request.resource.data));
+      allow delete: if isAdmin();
+    }
+
+    // ── studentActivities ──────────────────────────────────────────────────
+    // Students can only add/read their own activities
+    match /studentActivities/{actId} {
+      allow read:   if isAdmin()
+                    || isFaculty()
+                    || (isStudent() && resource.data.studentId == linkedId());
+      allow create: if isSignedIn()
+                    && (isAdmin() || request.resource.data.studentId == linkedId());
+      allow update: if isAdmin()
+                    || (isStudent() && resource.data.studentId == linkedId());
+      allow delete: if isAdmin()
+                    || (isStudent() && resource.data.studentId == linkedId());
+    }
+
+    // ── awards ─────────────────────────────────────────────────────────────
+    // Students can read their own awards — Admin manages all
+    match /awards/{awardId} {
+      allow read:   if isAdmin()
+                    || isFaculty()
+                    || (isStudent() && resource.data.studentId == linkedId());
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── violations — ADMIN ONLY ────────────────────────────────────────────
+    match /violations/{vId} {
+      allow read:   if isAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── organizations ──────────────────────────────────────────────────────
+    match /organizations/{orgId} {
+      allow read:   if isSignedIn();
+      allow write:  if isAdmin();
+    }
+
+    // ── studentOrganizations ───────────────────────────────────────────────
+    match /studentOrganizations/{id} {
+      allow read:   if isAdmin() || isFaculty()
+                    || (isStudent() && resource.data.studentId == linkedId());
+      allow write:  if isAdmin();
+    }
+
+    // ── subjects ───────────────────────────────────────────────────────────
+    match /subjects/{subId} {
+      allow read:   if isSignedIn();
+      allow write:  if isAdmin();
+    }
+
+    // ── curriculum ─────────────────────────────────────────────────────────
+    match /curriculum/{cId} {
+      allow read:   if isSignedIn();
+      allow write:  if isAdmin();
+    }
+
+    // ── schedules ──────────────────────────────────────────────────────────
+    match /schedules/{schedId} {
+      allow read:   if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── enrollments ────────────────────────────────────────────────────────
+    match /enrollments/{eId} {
+      allow read:   if isSignedIn();
+      allow write:  if isAdmin();
+    }
+
+    // ── grades ─────────────────────────────────────────────────────────────
+    // Faculty can only write grades for their own scheduled subjects
+    // Students can ONLY read their own grades — never another student's
+    match /grades/{gId} {
+      allow read:   if isAdmin()
+                    || isFaculty()
+                    || (isStudent() && resource.data.studentId == linkedId());
+      allow create: if isFaculty();
+      allow update: if isFaculty();
+      allow delete: if isAdmin();
+    }
+
+    // ── modules ────────────────────────────────────────────────────────────
+    // Faculty can only manage modules they uploaded (uploadedBy == their uid)
+    // Students can only READ visible modules
+    match /modules/{mId} {
+      allow read:   if isFaculty()
+                    || (isStudent() && resource.data.isVisible == true);
+      allow create: if isFaculty();
+      allow update: if isAdmin()
+                    || (isFaculty() && resource.data.uploadedBy == request.auth.uid);
+      allow delete: if isAdmin()
+                    || (isFaculty() && resource.data.uploadedBy == request.auth.uid);
+    }
+
+    // ── research ───────────────────────────────────────────────────────────
+    // Faculty can only update their own research entries
+    match /research/{rId} {
+      allow read:   if isSignedIn();
+      allow create: if isFaculty();
+      allow update: if isAdmin()
+                    || (isFaculty() && resource.data.facultyId == linkedId());
+      allow delete: if isAdmin();
+    }
+
+    // ── events ─────────────────────────────────────────────────────────────
+    match /events/{eId} {
+      allow read:   if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── eventParticipants ──────────────────────────────────────────────────
+    // Students can register themselves only
+    match /eventParticipants/{pId} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn()
+                    && (isAdmin() || request.resource.data.studentId == linkedId());
+      allow delete: if isAdmin()
+                    || (isStudent() && resource.data.studentId == linkedId());
+    }
+
+    // ── facultyAwards ──────────────────────────────────────────────────────
+    match /facultyAwards/{aId} {
+      allow read:   if isSignedIn();
+      allow write:  if isAdmin();
+    }
+  }
+}

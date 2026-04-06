@@ -1,0 +1,19 @@
+{
+  "indexes": [
+    { "collectionGroup": "students",          "queryScope": "COLLECTION", "fields": [{"fieldPath":"deptId","order":"ASCENDING"},{"fieldPath":"yearLevel","order":"ASCENDING"}] },
+    { "collectionGroup": "students",          "queryScope": "COLLECTION", "fields": [{"fieldPath":"deptId","order":"ASCENDING"},{"fieldPath":"isAthlete","order":"ASCENDING"}] },
+    { "collectionGroup": "students",          "queryScope": "COLLECTION", "fields": [{"fieldPath":"isAthlete","order":"ASCENDING"},{"fieldPath":"lastName","order":"ASCENDING"}] },
+    { "collectionGroup": "students",          "queryScope": "COLLECTION", "fields": [{"fieldPath":"isBeautyCandidate","order":"ASCENDING"},{"fieldPath":"lastName","order":"ASCENDING"}] },
+    { "collectionGroup": "schedules",         "queryScope": "COLLECTION", "fields": [{"fieldPath":"facultyId","order":"ASCENDING"},{"fieldPath":"schoolYear","order":"ASCENDING"}] },
+    { "collectionGroup": "schedules",         "queryScope": "COLLECTION", "fields": [{"fieldPath":"deptId","order":"ASCENDING"},{"fieldPath":"schoolYear","order":"ASCENDING"}] },
+    { "collectionGroup": "grades",            "queryScope": "COLLECTION", "fields": [{"fieldPath":"studentId","order":"ASCENDING"},{"fieldPath":"schoolYear","order":"DESCENDING"}] },
+    { "collectionGroup": "grades",            "queryScope": "COLLECTION", "fields": [{"fieldPath":"schedId","order":"ASCENDING"},{"fieldPath":"schoolYear","order":"ASCENDING"}] },
+    { "collectionGroup": "modules",           "queryScope": "COLLECTION", "fields": [{"fieldPath":"schedId","order":"ASCENDING"},{"fieldPath":"weekNumber","order":"ASCENDING"}] },
+    { "collectionGroup": "modules",           "queryScope": "COLLECTION", "fields": [{"fieldPath":"schedId","order":"ASCENDING"},{"fieldPath":"isVisible","order":"ASCENDING"}] },
+    { "collectionGroup": "research",          "queryScope": "COLLECTION", "fields": [{"fieldPath":"facultyId","order":"ASCENDING"},{"fieldPath":"publishYear","order":"DESCENDING"}] },
+    { "collectionGroup": "events",            "queryScope": "COLLECTION", "fields": [{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"eventDate","order":"ASCENDING"}] },
+    { "collectionGroup": "enrollments",       "queryScope": "COLLECTION", "fields": [{"fieldPath":"studentId","order":"ASCENDING"},{"fieldPath":"schoolYear","order":"ASCENDING"}] },
+    { "collectionGroup": "studentActivities", "queryScope": "COLLECTION", "fields": [{"fieldPath":"studentId","order":"ASCENDING"},{"fieldPath":"activityType","order":"ASCENDING"}] }
+  ],
+  "fieldOverrides": []
+}

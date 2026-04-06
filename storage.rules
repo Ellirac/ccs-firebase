@@ -1,0 +1,43 @@
+// storage.rules
+// CCS Comprehensive Profiling System — Firebase Storage Security Rules
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn()  { return request.auth != null; }
+    function role()        { return request.auth.token.role; }
+    function isAdmin()     { return role() == 'admin'; }
+    function isFaculty()   { return role() == 'faculty' || isAdmin(); }
+
+    // ── Profile pictures ─────────────────────────────────────────────────
+    match /profiles/{userId}/{file} {
+      allow read:   if isSignedIn();
+      allow write:  if isSignedIn() && request.auth.uid == userId
+                    && request.resource.size < 5 * 1024 * 1024
+                    && request.resource.contentType.matches('image/.*');
+    }
+
+    // ── Course modules & materials ────────────────────────────────────────
+    match /modules/{schedId}/{file} {
+      allow read:   if isSignedIn();
+      allow write:  if isFaculty()
+                    && request.resource.size < 50 * 1024 * 1024;
+    }
+
+    // ── Event posters ─────────────────────────────────────────────────────
+    match /events/{eventId}/{file} {
+      allow read:   if isSignedIn();
+      allow write:  if isAdmin()
+                    && request.resource.size < 10 * 1024 * 1024
+                    && request.resource.contentType.matches('image/.*');
+    }
+
+    // ── Research files ────────────────────────────────────────────────────
+    match /research/{researchId}/{file} {
+      allow read:   if isSignedIn();
+      allow write:  if isFaculty()
+                    && request.resource.size < 50 * 1024 * 1024;
+    }
+  }
+}

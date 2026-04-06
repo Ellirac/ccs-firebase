@@ -1,0 +1,23 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Environment / Firebase keys
+.env
+.env.local
+src/config/serviceAccountKey.json
+
+# Build
+build/
+.cache/
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/
+
+# Firebase emulator data
+.firebase/
+firebase-debug.log
+firestore-debug.log
+storage-debug.log
