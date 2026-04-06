@@ -20,6 +20,7 @@ const MENUS = {
     { section:"Activities" },
     { to:"/admin/events",        icon:"📅", label:"Events"           },
     { to:"/admin/research",      icon:"🔬", label:"Research"         },
+    { to:"/admin/reports",      icon:"🔬", label:"Reports"         },
   ],
   faculty: [
     { section:"Main" },

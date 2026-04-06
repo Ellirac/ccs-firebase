@@ -924,3 +924,512 @@ export function StudentModulesView() {
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// REPORTS PAGE (admin only — full analytics & exports)
+// ═══════════════════════════════════════════════════════════════════════════════
+export function Reports() {
+  const { isAdmin, isFaculty, linkedId } = useAuth();
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState("overview");
+  const [sy, setSy]               = useState("2024-2025");
+  const [sem, setSem]             = useState("1st");
+  const [dept, setDept]           = useState("");
+  const [exporting, setExporting] = useState(false);
+
+  // ── Data fetches ───────────────────────────────────────────────────────────
+  const { data: stats,    loading: loadStats }    = useFirestore(() => AdminService.getDashboardStats());
+  const { data: students, loading: loadStudents } = useFirestore(() => StudentService.getAll({ deptId: dept || undefined }), [dept]);
+  const { data: faculty,  loading: loadFaculty }  = useFirestore(() => FacultyService.getAll({ deptId: dept || undefined }), [dept]);
+  const { data: research, loading: loadResearch } = useFirestore(() => ResearchService.getAll());
+  const { data: events,   loading: loadEvents }   = useFirestore(() => EventsService.getAll());
+  const { data: allGrades }                       = useFirestore(() => GradesService.getAll ? GradesService.getAll({ schoolYear: sy, semester: sem }) : Promise.resolve([]), [sy, sem]);
+
+  // ── Derived analytics ──────────────────────────────────────────────────────
+  const s = stats || {};
+
+  // Grade distribution buckets
+  const gradeBuckets = (() => {
+    const g = allGrades || [];
+    return {
+      excellent: g.filter(x => parseFloat(x.finalGrade) >= 90).length,
+      good:      g.filter(x => parseFloat(x.finalGrade) >= 80 && parseFloat(x.finalGrade) < 90).length,
+      average:   g.filter(x => parseFloat(x.finalGrade) >= 75 && parseFloat(x.finalGrade) < 80).length,
+      failed:    g.filter(x => parseFloat(x.finalGrade) <  75 && x.finalGrade != null).length,
+      pending:   g.filter(x => !x.finalGrade).length,
+    };
+  })();
+
+  const totalGrades = Object.values(gradeBuckets).reduce((a, b) => a + b, 0) || 1;
+
+  // Research by type
+  const researchByType = (research || []).reduce((acc, r) => {
+    acc[r.researchType] = (acc[r.researchType] || 0) + 1;
+    return acc;
+  }, {});
+
+  // Events by type
+  const eventsByType = (events || []).reduce((acc, ev) => {
+    acc[ev.eventType] = (acc[ev.eventType] || 0) + 1;
+    return acc;
+  }, {});
+
+  // Students by scholarship
+  const scholarships = (students || []).reduce((acc, st) => {
+    const k = st.scholarship && st.scholarship !== "None" ? st.scholarship : "None";
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {});
+
+  // Faculty by position
+  const byPosition = (faculty || []).reduce((acc, f) => {
+    acc[f.position] = (acc[f.position] || 0) + 1;
+    return acc;
+  }, {});
+
+  // ── CSV export helper ──────────────────────────────────────────────────────
+  const exportCSV = async (type) => {
+    setExporting(true);
+    try {
+      let rows = [], headers = [], filename = "";
+      if (type === "students") {
+        headers  = ["ID","Last Name","First Name","Course","Year","Section","Dept","Scholarship","Athlete","Pageant","Officer"];
+        rows     = (students || []).map(s => [s.id, s.lastName, s.firstName, s.course, s.yearLevel, s.section, s.deptId, s.scholarship || "None", s.isAthlete ? "Yes" : "No", s.isBeautyCandidate ? "Yes" : "No", s.isOfficer ? "Yes" : "No"]);
+        filename = `students_${dept || "all"}_${Date.now()}.csv`;
+      } else if (type === "faculty") {
+        headers  = ["ID","Last Name","First Name","Title","Position","Dept","Specialization","Email","Yrs Service","Publications"];
+        rows     = (faculty || []).map(f => [f.id, f.lastName, f.firstName, f.title || "", POS_LABELS[f.position] || f.position, f.deptId, f.specialization, f.email, f.yearsInService || 0, f.publications || 0]);
+        filename = `faculty_${dept || "all"}_${Date.now()}.csv`;
+      } else if (type === "research") {
+        headers  = ["Title","Type","Status","Journal","Year","Authors","DOI"];
+        rows     = (research || []).map(r => [r.title, r.researchType, r.status, r.journal || "", r.publishYear || "", (Array.isArray(r.authors) ? r.authors : []).join("; "), r.doi || ""]);
+        filename = `research_${Date.now()}.csv`;
+      } else if (type === "grades") {
+        headers  = ["Student ID","Subject","Prelim","Midterm","Finals","Final Grade","Remarks","School Year","Semester"];
+        rows     = (allGrades || []).map(g => [g.studentId, g.subject?.subjectCode || g.schedId, g.prelim ?? "", g.midterm ?? "", g.finals ?? "", g.finalGrade ?? "", parseFloat(g.finalGrade) >= 75 ? "Passed" : g.finalGrade ? "Failed" : "Pending", g.schoolYear, g.semester]);
+        filename = `grades_${sy}_${sem}_${Date.now()}.csv`;
+      }
+      const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${rows.length} records`);
+    } catch { toast.error("Export failed"); }
+    finally { setExporting(false); }
+  };
+
+  // ── Sub-components ─────────────────────────────────────────────────────────
+  const TABS = [
+    { id: "overview",  label: "📊 Overview"  },
+    { id: "grades",    label: "📈 Grades"    },
+    { id: "students",  label: "🎓 Students"  },
+    { id: "faculty",   label: "👨‍🏫 Faculty"   },
+    { id: "research",  label: "🔬 Research"  },
+    { id: "events",    label: "📅 Events"    },
+    { id: "exports",   label: "⬇ Exports"   },
+  ];
+
+  // Mini bar chart row
+  const BarRow = ({ label, value, max, color, suffix = "" }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+      <div style={{ width: 110, fontSize: 12, color: "var(--mu2)", flexShrink: 0, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>{label}</div>
+      <div style={{ flex: 1, height: 8, background: "rgba(255,255,255,.06)", borderRadius: 4, overflow: "hidden" }}>
+        <div style={{ width: `${Math.min((value / (max || 1)) * 100, 100)}%`, height: "100%", background: color, borderRadius: 4, transition: "width .6s cubic-bezier(.4,0,.2,1)" }}/>
+      </div>
+      <div className="syne" style={{ width: 36, fontSize: 12, fontWeight: 700, color, textAlign: "right" }}>{value}{suffix}</div>
+    </div>
+  );
+
+  // Donut-style grade badge
+  const GradePill = ({ label, count, color, pct }) => (
+    <div style={{ background: `${color}11`, border: `1px solid ${color}33`, borderRadius: 12, padding: "12px 16px", textAlign: "center", flex: 1, minWidth: 90 }}>
+      <div className="syne" style={{ fontSize: 24, fontWeight: 900, color }}>{count}</div>
+      <div style={{ fontSize: 10, color: "var(--mu2)", marginTop: 2, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>{label}</div>
+      <div style={{ fontSize: 11, color, marginTop: 4, fontWeight: 700 }}>{pct}%</div>
+    </div>
+  );
+
+  // Export card
+  const ExportCard = ({ icon, title, desc, type, count, color }) => (
+    <div style={{ background: "var(--s2)", border: "1px solid var(--bd)", borderRadius: 14, padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 44, height: 44, borderRadius: 10, background: `${color}15`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>{icon}</div>
+        <div style={{ flex: 1 }}>
+          <div className="syne" style={{ fontWeight: 800, fontSize: 14 }}>{title}</div>
+          <div style={{ fontSize: 12, color: "var(--mu2)", marginTop: 2 }}>{desc}</div>
+        </div>
+        {count != null && <div className="syne" style={{ fontSize: 20, fontWeight: 900, color }}>{count}</div>}
+      </div>
+      <button className="btn btn-primary" onClick={() => exportCSV(type)} disabled={exporting}
+        style={{ background: color, border: "none", fontSize: 12, padding: "9px 14px" }}>
+        {exporting ? "Exporting…" : "⬇ Export CSV"}
+      </button>
+    </div>
+  );
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div className="page-content fu">
+      <PageHeader title="Reports & Analytics" sub="Institutional data summaries, distributions and CSV exports"
+        actions={
+          <div style={{ display: "flex", gap: 8 }}>
+            <select className="filter-select" value={dept} onChange={e => setDept(e.target.value)}>
+              <option value="">All Depts</option>
+              {["CS", "IT", "IS", "DS"].map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <select className="filter-select" value={sy} onChange={e => setSy(e.target.value)}>
+              <option value="2024-2025">2024–2025</option>
+              <option value="2023-2024">2023–2024</option>
+            </select>
+            <select className="filter-select" value={sem} onChange={e => setSem(e.target.value)}>
+              <option value="1st">1st Sem</option>
+              <option value="2nd">2nd Sem</option>
+              <option value="Summer">Summer</option>
+            </select>
+          </div>
+        }
+      />
+
+      {/* ── Tab Navigation ── */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 24, flexWrap: "wrap", borderBottom: "1px solid var(--bd)", paddingBottom: 0 }}>
+        {TABS.map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+            style={{
+              background: activeTab === tab.id ? "rgba(99,102,241,.12)" : "transparent",
+              border: "none", borderBottom: activeTab === tab.id ? "2px solid var(--a2)" : "2px solid transparent",
+              color: activeTab === tab.id ? "var(--a2)" : "var(--mu2)",
+              padding: "10px 16px", cursor: "pointer", fontFamily: "'Syne',sans-serif",
+              fontWeight: 700, fontSize: 12, borderRadius: "6px 6px 0 0", transition: "all .18s",
+              whiteSpace: "nowrap",
+            }}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          TAB: OVERVIEW
+      ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === "overview" && (
+        loadStats ? <Loading/> : <>
+          <div className="stats-grid" style={{ marginBottom: 24 }}>
+            <StatCard value={s.totalStudents}  label="Total Students"   color="var(--a)"  icon="🎓"/>
+            <StatCard value={s.totalFaculty}   label="Total Faculty"    color="var(--gr)" icon="👨‍🏫"/>
+            <StatCard value={s.totalResearch}  label="Publications"     color="var(--pu)" icon="🔬"/>
+            <StatCard value={s.upcomingEvents} label="Events"           color="var(--go)" icon="📅"/>
+            <StatCard value={s.athletes}       label="Athletes"         color="var(--gr)" icon="🏅"/>
+            <StatCard value={s.beauty}         label="Pageant Cands."   color="var(--pk)" icon="👑"/>
+            <StatCard value={s.officers}       label="Student Officers" color="var(--a2)" icon="⭐"/>
+            <StatCard value={s.scholars}       label="Scholars"         color="var(--go)" icon="🎖️"/>
+          </div>
+
+          <div className="d2">
+            <div>
+              <Section title="Students by Department">
+                {(s.byDept || []).map(d => {
+                  const max = Math.max(...(s.byDept || []).map(x => x.count), 1);
+                  return <BarRow key={d.deptId} label={d.deptId} value={d.count} max={max} color={DEPT_COLORS[d.deptId] || "#6366F1"}/>;
+                })}
+              </Section>
+              <Section title="Students by Year Level">
+                {(s.byYear || []).map(y => {
+                  const max = Math.max(...(s.byYear || []).map(x => x.count), 1);
+                  return <BarRow key={y.yearLevel} label={`Year ${y.yearLevel}`} value={y.count} max={max} color="var(--a)"/>;
+                })}
+              </Section>
+            </div>
+            <div>
+              <Section title="Faculty by Position">
+                {Object.entries(byPosition).sort((a, b) => b[1] - a[1]).map(([pos, cnt]) => {
+                  const max = Math.max(...Object.values(byPosition), 1);
+                  const c = { dean:"var(--a)", dept_chair:"var(--gr)", secretary:"var(--pu)", permanent:"var(--mu2)", ft_cos:"var(--go)", part_time:"var(--pk)" };
+                  return <BarRow key={pos} label={POS_LABELS[pos] || pos} value={cnt} max={max} color={c[pos] || "var(--a2)"}/>;
+                })}
+                {loadFaculty && <Loading/>}
+              </Section>
+              <Section title="Research by Status">
+                {[["published","var(--gr)"],["completed","var(--a)"],["ongoing","var(--go)"]].map(([st, color]) => {
+                  const cnt = (research || []).filter(r => r.status === st).length;
+                  return <BarRow key={st} label={st.charAt(0).toUpperCase() + st.slice(1)} value={cnt} max={(research || []).length || 1} color={color}/>;
+                })}
+                {loadResearch && <Loading/>}
+              </Section>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          TAB: GRADES
+      ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === "grades" && (
+        <>
+          <div style={{ background: "rgba(56,189,248,.05)", border: "1px solid rgba(56,189,248,.12)", borderRadius: 10, padding: "10px 16px", marginBottom: 20, fontSize: 12, color: "var(--mu2)" }}>
+            ℹ️ Showing grades for <strong style={{ color: "var(--tx)" }}>{sy} — {sem} Semester</strong>. Adjust filters above to change scope.
+          </div>
+
+          {/* Grade distribution pills */}
+          <Section title="Grade Distribution">
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 20 }}>
+              <GradePill label="Excellent (90+)" count={gradeBuckets.excellent} color="var(--a2)"  pct={((gradeBuckets.excellent / totalGrades) * 100).toFixed(1)}/>
+              <GradePill label="Good (80–89)"    count={gradeBuckets.good}      color="var(--gr)"  pct={((gradeBuckets.good / totalGrades) * 100).toFixed(1)}/>
+              <GradePill label="Average (75–79)" count={gradeBuckets.average}   color="var(--go)"  pct={((gradeBuckets.average / totalGrades) * 100).toFixed(1)}/>
+              <GradePill label="Failed (<75)"    count={gradeBuckets.failed}    color="var(--re)"  pct={((gradeBuckets.failed / totalGrades) * 100).toFixed(1)}/>
+              <GradePill label="Pending"         count={gradeBuckets.pending}   color="var(--mu2)" pct={((gradeBuckets.pending / totalGrades) * 100).toFixed(1)}/>
+            </div>
+
+            {/* Stacked visual bar */}
+            <div style={{ height: 14, borderRadius: 7, overflow: "hidden", display: "flex", marginBottom: 12 }}>
+              {[
+                { v: gradeBuckets.excellent, c: "var(--a2)"  },
+                { v: gradeBuckets.good,      c: "var(--gr)"  },
+                { v: gradeBuckets.average,   c: "var(--go)"  },
+                { v: gradeBuckets.failed,    c: "var(--re)"  },
+                { v: gradeBuckets.pending,   c: "var(--mu2)" },
+              ].map((seg, i) => (
+                <div key={i} style={{ flex: seg.v / totalGrades, background: seg.c, transition: "flex .6s ease" }}/>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--mu2)" }}>
+              Total grade records: <strong style={{ color: "var(--tx)" }}>{totalGrades === 1 && !allGrades?.length ? 0 : totalGrades}</strong>
+              {" "}· Pass rate: <strong style={{ color: "var(--gr)" }}>
+                {totalGrades > 0 ? (((gradeBuckets.excellent + gradeBuckets.good + gradeBuckets.average) / totalGrades) * 100).toFixed(1) : 0}%
+              </strong>
+            </div>
+          </Section>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+            <button className="btn btn-primary" onClick={() => exportCSV("grades")} disabled={exporting}>
+              {exporting ? "Exporting…" : "⬇ Export Grades CSV"}
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          TAB: STUDENTS
+      ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === "students" && (
+        loadStudents ? <Loading/> : <>
+          <div className="d2" style={{ marginBottom: 24 }}>
+            <Section title="Students by Department">
+              {(s.byDept || []).map(d => {
+                const max = Math.max(...(s.byDept || []).map(x => x.count), 1);
+                return <BarRow key={d.deptId} label={d.deptId} value={d.count} max={max} color={DEPT_COLORS[d.deptId] || "#6366F1"}/>;
+              })}
+            </Section>
+            <Section title="By Scholarship">
+              {Object.entries(scholarships).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
+                <BarRow key={k} label={k} value={v} max={Math.max(...Object.values(scholarships), 1)} color="var(--go)"/>
+              ))}
+              {Object.keys(scholarships).length === 0 && <div style={{ fontSize: 13, color: "var(--mu2)" }}>No data.</div>}
+            </Section>
+          </div>
+
+          <Section title="Special Classifications">
+            <div className="stats-grid">
+              <StatCard value={s.athletes} label="Athletes"        color="var(--gr)" icon="🏅"/>
+              <StatCard value={s.beauty}   label="Pageant Cands." color="var(--pk)" icon="👑"/>
+              <StatCard value={s.officers} label="Officers"        color="var(--a2)" icon="⭐"/>
+              <StatCard value={s.scholars} label="Scholars"        color="var(--go)" icon="🎖️"/>
+            </div>
+          </Section>
+
+          <Section title={`All Students (${(students || []).length})`}>
+            <div className="tw"><table className="tbl">
+              <thead><tr><th>ID</th><th>Name</th><th>Course</th><th>Year</th><th>Section</th><th>Dept</th><th>Scholarship</th><th>Tags</th></tr></thead>
+              <tbody>
+                {(students || []).slice(0, 50).map(s => (
+                  <tr key={s.id}>
+                    <td><span className="mono" style={{ fontSize: 11, color: "var(--a2)" }}>{s.id}</span></td>
+                    <td style={{ fontWeight: 600 }}>{s.lastName}, {s.firstName}</td>
+                    <td style={{ fontSize: 12 }}>{s.course}</td>
+                    <td>Yr {s.yearLevel}</td>
+                    <td><B t="bl">{s.section}</B></td>
+                    <td><B t="gy">{s.deptId}</B></td>
+                    <td style={{ fontSize: 12 }}>{s.scholarship || "None"}</td>
+                    <td><div className="tags" style={{ gap: 4 }}>
+                      {s.isAthlete         && <B t="gr">🏅</B>}
+                      {s.isBeautyCandidate && <B t="pk">👑</B>}
+                      {s.isOfficer         && <B t="pu">⭐</B>}
+                    </div></td>
+                  </tr>
+                ))}
+                {(students || []).length > 50 && (
+                  <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--mu2)", fontSize: 12, padding: 12 }}>
+                    Showing 50 of {students.length}. Export CSV for full data.
+                  </td></tr>
+                )}
+              </tbody>
+            </table></div>
+            <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+              <button className="btn btn-primary" onClick={() => exportCSV("students")} disabled={exporting}>
+                {exporting ? "Exporting…" : "⬇ Export Students CSV"}
+              </button>
+            </div>
+          </Section>
+        </>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          TAB: FACULTY
+      ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === "faculty" && (
+        loadFaculty ? <Loading/> : <>
+          <div className="d2" style={{ marginBottom: 24 }}>
+            <Section title="By Position">
+              {Object.entries(byPosition).sort((a, b) => b[1] - a[1]).map(([pos, cnt]) => {
+                const c = { dean:"var(--a)", dept_chair:"var(--gr)", secretary:"var(--pu)", permanent:"var(--mu2)", ft_cos:"var(--go)", part_time:"var(--pk)" };
+                return <BarRow key={pos} label={POS_LABELS[pos] || pos} value={cnt} max={Math.max(...Object.values(byPosition), 1)} color={c[pos] || "var(--a2)"}/>;
+              })}
+            </Section>
+            <Section title="By Department">
+              {["CS","IT","IS","DS"].map(d => {
+                const cnt = (faculty || []).filter(f => f.deptId === d).length;
+                return <BarRow key={d} label={d} value={cnt} max={(faculty || []).length || 1} color={DEPT_COLORS[d] || "#6366F1"}/>;
+              })}
+            </Section>
+          </div>
+
+          <Section title={`All Faculty (${(faculty || []).length})`}>
+            <div className="tw"><table className="tbl">
+              <thead><tr><th>ID</th><th>Name</th><th>Position</th><th>Dept</th><th>Specialization</th><th>Yrs</th><th>Pubs</th></tr></thead>
+              <tbody>
+                {(faculty || []).map(f => (
+                  <tr key={f.id}>
+                    <td><span className="mono" style={{ fontSize: 11, color: "var(--gr)" }}>{f.id}</span></td>
+                    <td style={{ fontWeight: 600 }}>{f.title || ""} {f.lastName}, {f.firstName}</td>
+                    <td><B t="gy">{POS_LABELS[f.position] || f.position}</B></td>
+                    <td><B t="bl">{f.deptId}</B></td>
+                    <td style={{ fontSize: 12 }}>{f.specialization || "—"}</td>
+                    <td style={{ fontSize: 12, textAlign: "center" }}>{f.yearsInService || 0}</td>
+                    <td style={{ fontSize: 12, textAlign: "center" }}>{f.publications || 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+            <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+              <button className="btn btn-primary" onClick={() => exportCSV("faculty")} disabled={exporting}>
+                {exporting ? "Exporting…" : "⬇ Export Faculty CSV"}
+              </button>
+            </div>
+          </Section>
+        </>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          TAB: RESEARCH
+      ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === "research" && (
+        loadResearch ? <Loading/> : <>
+          <div className="d2" style={{ marginBottom: 24 }}>
+            <Section title="By Research Type">
+              {Object.entries(researchByType).sort((a, b) => b[1] - a[1]).map(([type, cnt]) => (
+                <BarRow key={type} label={type.charAt(0).toUpperCase() + type.slice(1)} value={cnt} max={Math.max(...Object.values(researchByType), 1)} color="var(--pu)"/>
+              ))}
+              {Object.keys(researchByType).length === 0 && <div style={{ fontSize: 13, color: "var(--mu2)" }}>No data.</div>}
+            </Section>
+            <Section title="By Status">
+              {[["published","var(--gr)"],["completed","var(--a)"],["ongoing","var(--go)"]].map(([st, color]) => {
+                const cnt = (research || []).filter(r => r.status === st).length;
+                return <BarRow key={st} label={st.charAt(0).toUpperCase() + st.slice(1)} value={cnt} max={(research || []).length || 1} color={color}/>;
+              })}
+            </Section>
+          </div>
+
+          <div className="stats-grid" style={{ marginBottom: 24 }}>
+            <StatCard value={(research || []).length}                              label="Total Research"   color="var(--pu)" icon="🔬"/>
+            <StatCard value={(research || []).filter(r => r.status === "published").length} label="Published"  color="var(--gr)" icon="📄"/>
+            <StatCard value={(research || []).filter(r => r.status === "ongoing").length}   label="Ongoing"    color="var(--go)" icon="⚗️"/>
+            <StatCard value={(research || []).filter(r => r.doi).length}                   label="With DOI"   color="var(--a)"  icon="🔗"/>
+          </div>
+
+          <Section title="All Research Publications">
+            <div className="tw"><table className="tbl">
+              <thead><tr><th>Title</th><th>Type</th><th>Status</th><th>Journal</th><th>Year</th><th>Authors</th></tr></thead>
+              <tbody>
+                {(research || []).map(r => (
+                  <tr key={r.id}>
+                    <td style={{ fontWeight: 600, maxWidth: 240 }}>{r.title}</td>
+                    <td><B t="pu">{r.researchType}</B></td>
+                    <td><B t={r.status === "published" ? "gr" : r.status === "completed" ? "bl" : "go"}>{r.status}</B></td>
+                    <td style={{ fontSize: 12 }}>{r.journal || "—"}</td>
+                    <td style={{ fontSize: 12 }}>{r.publishYear || "—"}</td>
+                    <td style={{ fontSize: 11, color: "var(--mu2)" }}>{(Array.isArray(r.authors) ? r.authors : []).slice(0, 2).join(", ")}{(Array.isArray(r.authors) ? r.authors : []).length > 2 ? ` +${r.authors.length - 2}` : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+            <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+              <button className="btn btn-primary" onClick={() => exportCSV("research")} disabled={exporting}>
+                {exporting ? "Exporting…" : "⬇ Export Research CSV"}
+              </button>
+            </div>
+          </Section>
+        </>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          TAB: EVENTS
+      ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === "events" && (
+        loadEvents ? <Loading/> : <>
+          <div className="d2" style={{ marginBottom: 24 }}>
+            <Section title="By Event Type">
+              {Object.entries(eventsByType).sort((a, b) => b[1] - a[1]).map(([type, cnt]) => {
+                const c = { sports:"var(--gr)", pageant:"var(--pk)", academic:"var(--a)", cultural:"var(--pu)", seminar:"var(--go)" };
+                return <BarRow key={type} label={type.charAt(0).toUpperCase() + type.slice(1)} value={cnt} max={Math.max(...Object.values(eventsByType), 1)} color={c[type] || "var(--mu2)"}/>;
+              })}
+              {Object.keys(eventsByType).length === 0 && <div style={{ fontSize: 13, color: "var(--mu2)" }}>No data.</div>}
+            </Section>
+            <Section title="By Status">
+              {["upcoming","ongoing","completed","cancelled"].map(st => {
+                const cnt = (events || []).filter(e => e.status === st).length;
+                const c = { upcoming:"var(--gr)", ongoing:"var(--a)", completed:"var(--mu2)", cancelled:"var(--re)" };
+                return <BarRow key={st} label={st.charAt(0).toUpperCase() + st.slice(1)} value={cnt} max={(events || []).length || 1} color={c[st]}/>;
+              })}
+            </Section>
+          </div>
+
+          <Section title={`All Events (${(events || []).length})`}>
+            <div className="tw"><table className="tbl">
+              <thead><tr><th>Title</th><th>Type</th><th>Status</th><th>Date</th><th>Venue</th><th>Organizer</th></tr></thead>
+              <tbody>
+                {(events || []).map(ev => (
+                  <tr key={ev.id}>
+                    <td style={{ fontWeight: 600 }}>{ev.title}</td>
+                    <td><B t={{ sports:"gr", pageant:"pk", academic:"bl", cultural:"pu", seminar:"go" }[ev.eventType] || "gy"}>{ev.eventType}</B></td>
+                    <td><B t={{ upcoming:"gr", ongoing:"bl", completed:"gy", cancelled:"re" }[ev.status] || "gy"}>{ev.status}</B></td>
+                    <td style={{ fontSize: 12 }}>{fmtDate(ev.eventDate)}</td>
+                    <td style={{ fontSize: 12 }}>{ev.venue || "TBA"}</td>
+                    <td style={{ fontSize: 12 }}>{ev.organizer || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+          </Section>
+        </>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          TAB: EXPORTS
+      ════════════════════════════════════════════════════════════════════════ */}
+      {activeTab === "exports" && (
+        <>
+          <div style={{ background: "rgba(52,211,153,.05)", border: "1px solid rgba(52,211,153,.15)", borderRadius: 10, padding: "12px 16px", marginBottom: 24, fontSize: 13, color: "var(--mu2)" }}>
+            📋 All exports are generated as <strong style={{ color: "var(--tx)" }}>CSV files</strong> ready for Excel, Google Sheets, or any spreadsheet software. Use the department and semester filters above to scope your exports.
+          </div>
+          <div className="cards-grid">
+            <ExportCard icon="🎓" title="Student List"       desc={`${dept ? dept + " · " : ""}All enrolled students with details`}        type="students" count={(students || []).length}  color="var(--a)"/>
+            <ExportCard icon="👨‍🏫" title="Faculty List"       desc={`${dept ? dept + " · " : ""}All CCS faculty with positions`}              type="faculty"  count={(faculty  || []).length}  color="var(--gr)"/>
+            <ExportCard icon="📊" title="Grades Report"      desc={`${sy} ${sem} Semester — prelim, midterm and finals`}                      type="grades"   count={(allGrades || []).length} color="var(--go)"/>
+            <ExportCard icon="🔬" title="Research List"      desc="All publications, ongoing studies and theses"                               type="research" count={(research  || []).length}  color="var(--pu)"/>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

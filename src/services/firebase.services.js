@@ -416,7 +416,7 @@ export const AdminService = {
   getDashboardStats: async () => {
     const [students, faculty, events, research] = await Promise.all([
       snap(query(col("students"), where("status","==","active"))),
-      snap(col("faculty")),
+      snap(col("faculty")), 
       snap(query(col("events"), where("status","==","upcoming"))),
       snap(query(col("research"), where("status","==","published"))),
     ]);

@@ -21,6 +21,8 @@ import {
   StudentDashboard, StudentGrades, StudentGradeHistory, StudentActivities, StudentAwards, StudentModulesView,
   // Shared
   EventsPage, CurriculumPage, ResearchPage,
+  // Reports
+  Reports
 } from "./pages/AllPages";
 
 // Schedule page (reused across roles)
@@ -52,6 +54,7 @@ export default function App() {
               <Route path="/admin/schedule"      element={<SchedulePage/>}/>
               <Route path="/admin/curriculum"    element={<CurriculumPage/>}/>
               <Route path="/admin/research"      element={<ResearchPage/>}/>
+              <Route path="/admin/reports"      element={<Reports/>}/>
             </Route>
           </Route>
 
